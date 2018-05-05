@@ -35,7 +35,7 @@ INCLUDE_DIRS    := $(INCLUDE_DIRS) \
 ifneq ($(filter VCP, $(FEATURES)),)
 INCLUDE_DIRS    := $(INCLUDE_DIRS) \
                    $(USBFS_DIR)/inc \
-                   $(ROOT)/src/main/vcp
+                   $(ROOT)/src/main/vcp_composite
 
 VPATH           := $(VPATH):$(USBFS_DIR)/src
 
@@ -56,13 +56,13 @@ ARCH_FLAGS      = -mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16 -fs
 DEVICE_FLAGS    = -DSTM32F303xC -DSTM32F303
 
 VCP_SRC = \
-            vcp/hw_config.c \
-            vcp/stm32_it.c \
-            vcp/usb_desc.c \
-            vcp/usb_endp.c \
-            vcp/usb_istr.c \
-            vcp/usb_prop.c \
-            vcp/usb_pwr.c \
+            vcp_composite/hw_config.c \
+            vcp_composite/stm32_it.c \
+            vcp_composite/usb_desc.c \
+            vcp_composite/usb_endp.c \
+            vcp_composite/usb_istr.c \
+            vcp_composite/usb_prop.c \
+            vcp_composite/usb_pwr.c \
             drivers/serial_usb_vcp.c \
             drivers/usb_io.c
 

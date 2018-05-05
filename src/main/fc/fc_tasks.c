@@ -96,6 +96,8 @@
 #elif defined(STM32F7)
 #include "usbd_cdc_interface.h"
 #include "usbd_hid.h"
+#else
+#include "hw_config.h"
 #endif
 #endif
 
@@ -159,11 +161,14 @@ static void taskUpdateRxMain(timeUs_t currentTimeUs)
         for (int i = 0; i < 8; i++) {
 	        	report[i] = scaleRange(constrain(rcData[i], 1000, 2000), 1000, 2000, -127, 127);
         }
+        report[5] = report[2];
 #ifdef STM32F4
         USBD_HID_SendReport(&USB_OTG_dev, (uint8_t*)report, sizeof(report));
 #elif defined(STM32F7)
         extern USBD_HandleTypeDef  USBD_Device;
         USBD_HID_SendReport(&USBD_Device, (uint8_t*)report, sizeof(report));
+#else
+        Joystick_Send((uint8_t*)report, sizeof(report));
 #endif
     }
 #endif

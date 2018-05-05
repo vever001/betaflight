@@ -45,6 +45,7 @@
 #define MINIMAL_CLI
 #define USE_DSHOT
 #define USE_GYRO_DATA_ANALYSE
+#define USE_USB_CDC_HID
 #endif
 
 #ifdef STM32F4
