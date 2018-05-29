@@ -87,15 +87,15 @@ extern uint8_t __config_end;
 #include "fc/config.h"
 #include "fc/controlrate_profile.h"
 #include "fc/fc_core.h"
+#include "fc/fc_rc.h"
 #include "fc/rc_adjustments.h"
 #include "fc/rc_controls.h"
 #include "fc/runtime_config.h"
 
-#include "flight/altitude.h"
+#include "flight/position.h"
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/navigation.h"
 #include "flight/pid.h"
 #include "flight/servos.h"
 
@@ -122,10 +122,12 @@ extern uint8_t __config_end;
 #include "pg/beeper_dev.h"
 #include "pg/bus_i2c.h"
 #include "pg/bus_spi.h"
+#include "pg/max7456.h"
 #include "pg/pinio.h"
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 #include "pg/rx_pwm.h"
+#include "pg/timerio.h"
 #include "pg/usb.h"
 
 #include "rx/rx.h"
@@ -368,6 +370,9 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
         case VAR_INT16:
             value = *(int16_t *)valuePointer;
             break;
+        case VAR_UINT32:
+            value = *(uint32_t *)valuePointer;
+            break;
         }
 
         switch (var->type & VALUE_MODE_MASK) {
@@ -380,6 +385,12 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
         case MODE_LOOKUP:
             cliPrint(lookupTables[var->config.lookup.tableIndex].values[value]);
             break;
+        case MODE_BITSET:
+            if (value & 1 << var->config.bitpos) {
+                cliPrintf("ON");
+            } else {
+                cliPrintf("OFF");
+            }
         }
     }
 }
@@ -389,14 +400,18 @@ static bool valuePtrEqualsDefault(const clivalue_t *var, const void *ptr, const 
 {
     bool result = true;
     int elementCount = 1;
+    uint32_t mask = 0xffffffff;
 
     if ((var->type & VALUE_MODE_MASK) == MODE_ARRAY) {
         elementCount = var->config.array.length;
     }
+    if ((var->type & VALUE_MODE_MASK) == MODE_BITSET) {
+        mask = 1 << var->config.bitpos;
+    }
     for (int i = 0; i < elementCount; i++) {
         switch (var->type & VALUE_TYPE_MASK) {
         case VAR_UINT8:
-            result = result && ((uint8_t *)ptr)[i] == ((uint8_t *)ptrDefault)[i];
+            result = result && (((uint8_t *)ptr)[i] & mask) == (((uint8_t *)ptrDefault)[i] & mask);
             break;
 
         case VAR_INT8:
@@ -404,8 +419,13 @@ static bool valuePtrEqualsDefault(const clivalue_t *var, const void *ptr, const 
             break;
 
         case VAR_UINT16:
+            result = result && (((int16_t *)ptr)[i] & mask) == (((int16_t *)ptrDefault)[i] & mask);
+            break;
         case VAR_INT16:
             result = result && ((int16_t *)ptr)[i] == ((int16_t *)ptrDefault)[i];
+            break;
+        case VAR_UINT32:
+            result = result && (((uint32_t *)ptr)[i] & mask) == (((uint32_t *)ptrDefault)[i] & mask);
             break;
         }
     }
@@ -509,7 +529,10 @@ static void cliPrintVarRange(const clivalue_t *var)
     case (MODE_ARRAY): {
         cliPrintLinef("Array length: %d", var->config.array.length);
     }
-
+    break;
+    case (MODE_BITSET): {
+        cliPrintLinef("Allowed values: OFF, ON");
+    }
     break;
     }
 }
@@ -517,20 +540,57 @@ static void cliPrintVarRange(const clivalue_t *var)
 static void cliSetVar(const clivalue_t *var, const int16_t value)
 {
     void *ptr = cliGetValuePointer(var);
+    uint32_t workValue;
+    uint32_t mask;
 
-    switch (var->type & VALUE_TYPE_MASK) {
-    case VAR_UINT8:
-        *(uint8_t *)ptr = value;
-        break;
+    if ((var->type & VALUE_MODE_MASK) == MODE_BITSET) {
+        switch (var->type & VALUE_TYPE_MASK) {
+        case VAR_UINT8:
+            mask = (1 << var->config.bitpos) & 0xff;
+            if (value) {
+                workValue = *(uint8_t *)ptr | mask;
+            } else {
+                workValue = *(uint8_t *)ptr & ~mask;
+            }
+            *(uint8_t *)ptr = workValue;
+            break;
 
-    case VAR_INT8:
-        *(int8_t *)ptr = value;
-        break;
+        case VAR_UINT16:
+            mask = (1 << var->config.bitpos) & 0xffff;
+            if (value) {
+                workValue = *(uint16_t *)ptr | mask;
+            } else {
+                workValue = *(uint16_t *)ptr & ~mask;
+            }
+            *(uint16_t *)ptr = workValue;
+            break;
 
-    case VAR_UINT16:
-    case VAR_INT16:
-        *(int16_t *)ptr = value;
-        break;
+        case VAR_UINT32:
+            mask = 1 << var->config.bitpos;
+            if (value) {
+                workValue = *(uint32_t *)ptr | mask;
+            } else {
+                workValue = *(uint32_t *)ptr & ~mask;
+            }
+            *(uint32_t *)ptr = workValue;
+            break;
+
+        }
+    } else {
+        switch (var->type & VALUE_TYPE_MASK) {
+        case VAR_UINT8:
+            *(uint8_t *)ptr = value;
+            break;
+
+        case VAR_INT8:
+            *(int8_t *)ptr = value;
+            break;
+
+        case VAR_UINT16:
+        case VAR_INT16:
+            *(int16_t *)ptr = value;
+            break;
+        }
     }
 }
 
@@ -2373,11 +2433,27 @@ static void cliGpsPassthrough(char *cmdline)
 #endif
 
 #if defined(USE_GYRO_REGISTER_DUMP) && !defined(SIMULATOR_BUILD)
+static void cliPrintGyroRegisters(uint8_t whichSensor)
+{
+    tfp_printf("# WHO_AM_I    0x%X\r\n", gyroReadRegister(whichSensor, MPU_RA_WHO_AM_I));
+    tfp_printf("# CONFIG      0x%X\r\n", gyroReadRegister(whichSensor, MPU_RA_CONFIG));
+    tfp_printf("# GYRO_CONFIG 0x%X\r\n", gyroReadRegister(whichSensor, MPU_RA_GYRO_CONFIG));
+}
+
 static void cliDumpGyroRegisters(char *cmdline)
 {
-    tfp_printf("# WHO_AM_I    0x%X\r\n", gyroReadRegister(MPU_RA_WHO_AM_I));
-    tfp_printf("# CONFIG      0x%X\r\n", gyroReadRegister(MPU_RA_CONFIG));
-    tfp_printf("# GYRO_CONFIG 0x%X\r\n", gyroReadRegister(MPU_RA_GYRO_CONFIG));
+#ifdef USE_DUAL_GYRO
+    if ((gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_1) || (gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_BOTH)) {
+        tfp_printf("\r\n# Gyro 1\r\n");
+        cliPrintGyroRegisters(GYRO_CONFIG_USE_GYRO_1);
+    }
+    if ((gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_2) || (gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_BOTH)) {
+        tfp_printf("\r\n# Gyro 2\r\n");
+        cliPrintGyroRegisters(GYRO_CONFIG_USE_GYRO_2);
+    }
+#else
+    cliPrintGyroRegisters(GYRO_CONFIG_USE_GYRO_1);
+#endif // USE_DUAL_GYRO
     UNUSED(cmdline);
 }
 #endif
@@ -3013,8 +3089,15 @@ STATIC_UNIT_TESTED void cliSet(char *cmdline)
                     }
 
                     break;
-                case MODE_LOOKUP: {
-                        const lookupTableEntry_t *tableEntry = &lookupTables[val->config.lookup.tableIndex];
+                case MODE_LOOKUP: 
+                case MODE_BITSET: {
+                        int tableIndex;
+                        if ((val->type & VALUE_MODE_MASK) == MODE_BITSET) {
+                            tableIndex = TABLE_OFF_ON;
+                        } else {
+                            tableIndex = val->config.lookup.tableIndex;
+                        }
+                        const lookupTableEntry_t *tableEntry = &lookupTables[tableIndex];
                         bool matched = false;
                         for (uint32_t tableValueIndex = 0; tableValueIndex < tableEntry->valueCount && !matched; tableValueIndex++) {
                             matched = tableEntry->values[tableValueIndex] && strcasecmp(tableEntry->values[tableValueIndex], eqptr) == 0;
@@ -3029,6 +3112,7 @@ STATIC_UNIT_TESTED void cliSet(char *cmdline)
                     }
 
                     break;
+
                 case MODE_ARRAY: {
                         const uint8_t arrayLength = val->config.array.length;
                         char *valPtr = eqptr;
@@ -3092,6 +3176,7 @@ STATIC_UNIT_TESTED void cliSet(char *cmdline)
                     valueChanged = true;
 
                     break;
+
                 }
 
                 if (valueChanged) {
@@ -3178,7 +3263,7 @@ static void cliStatus(char *cmdline)
     cliPrintLinef("I2C Errors: %d, config size: %d, max available config: %d", i2cErrorCounter, getEEPROMConfigSize(), CONFIG_SIZE);
 
     const int gyroRate = getTaskDeltaTime(TASK_GYROPID) == 0 ? 0 : (int)(1000000.0f / ((float)getTaskDeltaTime(TASK_GYROPID)));
-    const int rxRate = getTaskDeltaTime(TASK_RX) == 0 ? 0 : (int)(1000000.0f / ((float)getTaskDeltaTime(TASK_RX)));
+    const int rxRate = currentRxRefreshRate == 0 ? 0 : (int)(1000000.0f / ((float)currentRxRefreshRate));
     const int systemRate = getTaskDeltaTime(TASK_SYSTEM) == 0 ? 0 : (int)(1000000.0f / ((float)getTaskDeltaTime(TASK_SYSTEM)));
     cliPrintLinef("CPU:%d%%, cycle time: %d, GYRO rate: %d, RX rate: %d, System rate: %d",
             constrain(averageSystemLoadPercent, 0, 100), getTaskDeltaTime(TASK_GYROPID), gyroRate, rxRate, systemRate);
@@ -3350,6 +3435,9 @@ const cliResourceValue_t resourceTable[] = {
 #endif
 #ifdef USE_FLASH
     { OWNER_FLASH_CS,      PG_FLASH_CONFIG, offsetof(flashConfig_t, csTag), 0 },
+#endif
+#ifdef USE_MAX7456
+    { OWNER_OSD_CS,        PG_MAX7456_CONFIG, offsetof(max7456Config_t, csTag), 0 },
 #endif
 };
 
@@ -3587,6 +3675,115 @@ static void cliDma(char* cmdLine)
     printDma();
 }
 #endif /* USE_RESOURCE_MGMT */
+
+#ifdef USE_TIMER_MGMT
+
+static void printTimer(uint8_t dumpMask)
+{
+    cliPrintLine("# examples: ");
+    const char *format = "timer %c%02d %d";
+    cliPrint("#");
+    cliPrintLinef(format, 'A', 1, 1);
+
+    cliPrint("#");
+    cliPrintLinef(format, 'A', 1, 0);
+    
+    for (unsigned int i = 0; i < MAX_TIMER_PINMAP_COUNT; i++) {
+
+        const ioTag_t ioTag = timerIOConfig(i)->ioTag;
+        const uint8_t timerIndex = timerIOConfig(i)->index;
+
+        if (!ioTag) {
+            continue;
+        }
+
+        if (timerIndex != 0 && !(dumpMask & HIDE_UNUSED)) {
+            cliDumpPrintLinef(dumpMask, false, format, 
+                IO_GPIOPortIdxByTag(ioTag) + 'A', 
+                IO_GPIOPinIdxByTag(ioTag),
+                timerIndex
+                );
+        }
+    }
+}
+
+static void cliTimer(char *cmdline)
+{
+    int len = strlen(cmdline);
+
+    if (len == 0) {
+        printTimer(DUMP_MASTER | HIDE_UNUSED);
+        return;
+    } else if (strncasecmp(cmdline, "list", len) == 0) {
+        printTimer(DUMP_MASTER);
+        return;
+    }
+    
+    char *pch = NULL;
+    char *saveptr;
+    int timerIOIndex = -1;
+    
+    ioTag_t ioTag = 0;
+    pch = strtok_r(cmdline, " ", &saveptr);    
+    if (!pch || !(strToPin(pch, &ioTag) && IOGetByTag(ioTag))) {
+        goto error;
+    }
+
+    /* find existing entry, or go for next available */
+    for (unsigned i = 0; i < MAX_TIMER_PINMAP_COUNT; i++) {
+        if (timerIOConfig(i)->ioTag == ioTag) {
+            timerIOIndex = i;
+            break;
+        }
+
+        /* first available empty slot */
+        if (timerIOIndex < 0 && timerIOConfig(i)->ioTag == IO_TAG_NONE) {
+            timerIOIndex = i;
+        }
+    }
+
+    if (timerIOIndex < 0) {
+        cliPrintLine("Error: out of index");
+        return;
+    }
+
+    uint8_t timerIndex = 0;
+    pch = strtok_r(NULL, " ", &saveptr);
+    if (pch) {
+        if (strcasecmp(pch, "list") == 0) {
+            /* output the list of available options */
+            uint8_t index = 1;
+            for (unsigned i = 0; i < USABLE_TIMER_CHANNEL_COUNT; i++) {
+                if (timerHardware[i].tag == ioTag) {
+                    cliPrintLinef("# %d. TIM%d CH%d",
+                        index,
+                        timerGetTIMNumber(timerHardware[i].tim),
+                        CC_INDEX_FROM_CHANNEL(timerHardware[i].channel)
+                    );
+                    index++;
+                }
+            }
+            return;
+        } else if (strcasecmp(pch, "none") == 0) {
+            goto success;
+        } else {
+            timerIndex = atoi(pch);
+        }
+    } else {
+        goto error;
+    }  
+
+success:
+    timerIOConfigMutable(timerIOIndex)->ioTag = timerIndex == 0 ? IO_TAG_NONE : ioTag;
+    timerIOConfigMutable(timerIOIndex)->index = timerIndex;
+
+    cliPrintLine("Success");
+    return;
+    
+error:
+    cliShowParseError();
+}
+#endif
 
 static void backupConfigs(void)
 {
@@ -3849,6 +4046,9 @@ const clicmd_t cmdTable[] = {
 #endif
     CLI_COMMAND_DEF("defaults", "reset to defaults and reboot", "[nosave]", cliDefaults),
     CLI_COMMAND_DEF("diff", "list configuration changes from default", "[master|profile|rates|all] {defaults}", cliDiff),
+#ifdef USE_RESOURCE_MGMT
+    CLI_COMMAND_DEF("dma", "list dma utilisation", NULL, cliDma),
+#endif
 #ifdef USE_DSHOT
     CLI_COMMAND_DEF("dshotprog", "program DShot ESC(s)", "<index> <command>+", cliDshotProg),
 #endif
@@ -3892,6 +4092,9 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),
 #endif
     CLI_COMMAND_DEF("motor",  "get/set motor", "<index> [<value>]", cliMotor),
+#ifdef USE_USB_MSC
+    CLI_COMMAND_DEF("msc", "switch into msc mode", NULL, cliMsc),
+#endif
     CLI_COMMAND_DEF("name", "name of craft", NULL, cliName),
 #ifndef MINIMAL_CLI
     CLI_COMMAND_DEF("play_sound", NULL, "[<index>]", cliPlaySound),
@@ -3900,7 +4103,6 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("rateprofile", "change rate profile", "[<index>]", cliRateProfile),
 #ifdef USE_RESOURCE_MGMT
     CLI_COMMAND_DEF("resource", "show/set resources", NULL, cliResource),
-    CLI_COMMAND_DEF("dma", "list dma utilisation", NULL, cliDma),
 #endif
     CLI_COMMAND_DEF("rxfail", "show/set rx failsafe settings", NULL, cliRxFailsafe),
     CLI_COMMAND_DEF("rxrange", "configure rx channel ranges", NULL, cliRxRange),
@@ -3926,12 +4128,12 @@ const clicmd_t cmdTable[] = {
 #ifndef SKIP_TASK_STATISTICS
     CLI_COMMAND_DEF("tasks", "show task stats", NULL, cliTasks),
 #endif
+#ifdef USE_TIMER_MGMT
+    CLI_COMMAND_DEF("timer", "show timer configuration", NULL, cliTimer),
+#endif
     CLI_COMMAND_DEF("version", "show version", NULL, cliVersion),
 #ifdef USE_VTX_CONTROL
     CLI_COMMAND_DEF("vtx", "vtx channels on switch", NULL, cliVtx),
-#endif
-#ifdef USE_USB_MSC
-	CLI_COMMAND_DEF("msc", "switch into msc mode", NULL, cliMsc),
 #endif
 };
 

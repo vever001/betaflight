@@ -142,12 +142,7 @@ void doTestArm(bool testEmpty = true)
  * Auxiliary function. Test is there're stats that must be shown
  */
 bool isSomeStatEnabled(void) {
-    for (int i = 0; i < OSD_STAT_COUNT; i++) {
-        if (osdConfigMutable()->enabled_stats[i]) {
-            return true;
-        }
-    }
-    return false;
+    return (osdConfigMutable()->enabled_stats != 0);
 }
 
 /*
@@ -288,19 +283,19 @@ TEST(OsdTest, TestStatsImperial)
 {
     // given
     // this set of enabled post flight statistics
-    osdConfigMutable()->enabled_stats[OSD_STAT_MAX_SPEED]       = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_MIN_BATTERY]     = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_MIN_RSSI]        = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_MAX_CURRENT]     = false;
-    osdConfigMutable()->enabled_stats[OSD_STAT_USED_MAH]        = false;
-    osdConfigMutable()->enabled_stats[OSD_STAT_MAX_ALTITUDE]    = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_BLACKBOX]        = false;
-    osdConfigMutable()->enabled_stats[OSD_STAT_END_BATTERY]     = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_TIMER_1]         = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_TIMER_2]         = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_RTC_DATE_TIME]   = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_MAX_DISTANCE]    = true;
-    osdConfigMutable()->enabled_stats[OSD_STAT_BLACKBOX_NUMBER] = false;
+    osdStatSetState(OSD_STAT_MAX_SPEED, true);
+    osdStatSetState(OSD_STAT_MIN_BATTERY, true);
+    osdStatSetState(OSD_STAT_MIN_RSSI, true);
+    osdStatSetState(OSD_STAT_MAX_CURRENT, false);
+    osdStatSetState(OSD_STAT_USED_MAH, false);
+    osdStatSetState(OSD_STAT_MAX_ALTITUDE, true);
+    osdStatSetState(OSD_STAT_BLACKBOX, false);
+    osdStatSetState(OSD_STAT_END_BATTERY, true);
+    osdStatSetState(OSD_STAT_TIMER_1, true);
+    osdStatSetState(OSD_STAT_TIMER_2, true);
+    osdStatSetState(OSD_STAT_RTC_DATE_TIME, true);
+    osdStatSetState(OSD_STAT_MAX_DISTANCE, true);
+    osdStatSetState(OSD_STAT_BLACKBOX_NUMBER, false);
 
     // and
     // using imperial unit system
@@ -370,7 +365,7 @@ TEST(OsdTest, TestStatsImperial)
     displayPortTestBufferSubstring(2, row++, "2017-11-19 10:12:");
     displayPortTestBufferSubstring(2, row++, "TOTAL ARM         : 00:05.00");
     displayPortTestBufferSubstring(2, row++, "LAST ARM          : 00:03");
-    displayPortTestBufferSubstring(2, row++, "MAX SPEED         : 28");
+    displayPortTestBufferSubstring(2, row++, "MAX SPEED         : 17");
     displayPortTestBufferSubstring(2, row++, "MAX DISTANCE      : 328%c", SYM_FT);
     displayPortTestBufferSubstring(2, row++, "MIN BATTERY       : 14.7%c", SYM_VOLT);
     displayPortTestBufferSubstring(2, row++, "END BATTERY       : 15.2%c", SYM_VOLT);
@@ -796,7 +791,10 @@ TEST(OsdTest, TestElementWarningsBattery)
 {
     // given
     osdConfigMutable()->item_pos[OSD_WARNINGS] = OSD_POS(9, 10) | VISIBLE_FLAG;
-    osdConfigMutable()->enabledWarnings = OSD_WARNING_BATTERY_WARNING | OSD_WARNING_BATTERY_CRITICAL | OSD_WARNING_BATTERY_NOT_FULL;
+    osdConfigMutable()->enabledWarnings = 0;  // disable all warnings
+    osdWarnSetState(OSD_WARNING_BATTERY_WARNING, true);
+    osdWarnSetState(OSD_WARNING_BATTERY_CRITICAL, true);
+    osdWarnSetState(OSD_WARNING_BATTERY_NOT_FULL, true);
 
     // and
     batteryConfigMutable()->vbatfullcellvoltage = 41;
@@ -1020,4 +1018,6 @@ extern "C" {
     bool isFlipOverAfterCrashMode(void) {
         return false;
     }
+
+    float pidItermAccelerator(void) { return 1.0; }
 }

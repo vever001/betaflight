@@ -51,6 +51,9 @@ typedef enum {
     FUNCTION_LIDAR_TF            = (1 << 15), // 32768
 } serialPortFunction_e;
 
+#define TELEMETRY_SHAREABLE_PORT_FUNCTIONS_MASK (FUNCTION_TELEMETRY_FRSKY_HUB | FUNCTION_TELEMETRY_LTM | FUNCTION_TELEMETRY_MAVLINK)
+#define TELEMETRY_PORT_FUNCTIONS_MASK (TELEMETRY_SHAREABLE_PORT_FUNCTIONS_MASK | FUNCTION_TELEMETRY_HOTT | FUNCTION_TELEMETRY_SMARTPORT)
+
 typedef enum {
     BAUD_AUTO = 0,
     BAUD_9600,
@@ -104,7 +107,6 @@ typedef struct serialPortUsage_s {
 } serialPortUsage_t;
 
 serialPort_t *findSharedSerialPort(uint16_t functionMask, serialPortFunction_e sharedWithFunction);
-serialPort_t *findNextSharedSerialPort(uint16_t functionMask, serialPortFunction_e sharedWithFunction);
 
 //
 // configuration

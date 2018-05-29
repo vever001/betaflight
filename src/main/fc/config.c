@@ -42,7 +42,6 @@
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/navigation.h"
 #include "flight/pid.h"
 #include "flight/servos.h"
 
@@ -86,14 +85,6 @@ PG_RESET_TEMPLATE(systemConfig_t, systemConfig,
     .powerOnArmingGraceTime = 5,
     .boardIdentifier = TARGET_BOARD_IDENTIFIER
 );
-
-#ifdef SWAP_SERIAL_PORT_0_AND_1_DEFAULTS
-#define FIRST_PORT_INDEX 1
-#define SECOND_PORT_INDEX 0
-#else
-#define FIRST_PORT_INDEX 0
-#define SECOND_PORT_INDEX 1
-#endif
 
 #ifndef USE_OSD_SLAVE
 uint8_t getCurrentPidProfileIndex(void)
@@ -148,10 +139,6 @@ void activateConfig(void)
     pidInit(currentPidProfile);
     useRcControlsConfig(currentPidProfile);
     useAdjustmentConfig(currentPidProfile);
-
-#ifdef USE_NAV
-    gpsUsePIDs(currentPidProfile);
-#endif
 
     failsafeReset();
     setAccelerationTrims(&accelerometerConfigMutable()->accZero);
@@ -359,7 +346,7 @@ static void validateAndFixConfig(void)
 #endif
 
 #if defined(USE_BEEPER)
-    if (beeperDevConfig()->frequency && !timerGetByTag(beeperDevConfig()->ioTag, TIM_USE_BEEPER)) {
+    if (beeperDevConfig()->frequency && !timerGetByTag(beeperDevConfig()->ioTag)) {
         beeperDevConfigMutable()->frequency = 0;
     }
 #endif

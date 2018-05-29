@@ -57,11 +57,10 @@
 
 #include "telemetry/telemetry.h"
 
-#include "flight/altitude.h"
+#include "flight/position.h"
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/navigation.h"
 #include "flight/pid.h"
 #include "flight/servos.h"
 

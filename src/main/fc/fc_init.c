@@ -148,7 +148,6 @@
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/navigation.h"
 #include "flight/pid.h"
 #include "flight/servos.h"
 
@@ -256,8 +255,8 @@ void spiPreInit(void)
 #if defined(RTC6705_CS_PIN) && !defined(USE_VTX_RTC6705_SOFTSPI) // RTC6705 soft SPI initialisation handled elsewhere.
     spiPreInitCs(IO_TAG(RTC6705_CS_PIN));
 #endif
-#ifdef M25P16_CS_PIN
-    spiPreInitCs(IO_TAG(M25P16_CS_PIN));
+#ifdef FLASH_CS_PIN
+    spiPreInitCs(IO_TAG(FLASH_CS_PIN));
 #endif
 #if defined(USE_RX_SPI) && !defined(USE_RX_SOFTSPI)
     spiPreInitCs(IO_TAG(RX_NSS_PIN));
@@ -438,7 +437,7 @@ void init(void)
     beeperInit(beeperDevConfig());
 #endif
 /* temp until PGs are implemented. */
-#if defined(USE_INVERTER) && !defined(SITL)
+#if defined(USE_INVERTER) && !defined(SIMULATOR_BUILD)
     initInverters(serialPinConfig());
 #endif
 
@@ -662,9 +661,6 @@ void init(void)
 #ifdef USE_GPS
     if (feature(FEATURE_GPS)) {
         gpsInit();
-#ifdef USE_NAV
-        navigationInit();
-#endif
     }
 #endif
 
@@ -784,10 +780,6 @@ void init(void)
         dashboardEnablePageCycling();
 #endif
     }
-#endif
-
-#ifdef CJMCU
-    LED2_ON;
 #endif
 
 #ifdef USE_RCDEVICE

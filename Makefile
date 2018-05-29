@@ -356,7 +356,7 @@ $(VALID_TARGETS):
 	$(MAKE) binary hex TARGET=$@ && \
 	echo "Building $@ succeeded."
 
-$(SKIP_TARGETS):
+$(NOBUILD_TARGETS):
 	$(MAKE) TARGET=$@
 
 CLEAN_TARGETS = $(addprefix clean_,$(VALID_TARGETS) )
@@ -472,6 +472,17 @@ targets:
 ## junittest         : run the cleanflight test suite, producing Junit XML result files.
 test junittest:
 	$(V0) cd src/test && $(MAKE) $@
+
+
+check-target-independence:
+	$(V1) for test_target in $(VALID_TARGETS); do \
+		FOUND=$$(grep -rP "\W$${test_target}\W?" src/main/ | grep -vP "(\/\/)|(\/\*).*\W$${test_target}\W?" | grep -vP "^src/main/target"); \
+		if [ "$${FOUND}" != "" ]; then \
+			echo "Target dependencies found:"; \
+			echo "$${FOUND}"; \
+			exit 1; \
+		fi; \
+	done
 
 # rebuild everything when makefile changes
 $(TARGET_OBJS) : Makefile

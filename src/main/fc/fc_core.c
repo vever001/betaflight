@@ -56,6 +56,7 @@
 #include "fc/config.h"
 #include "fc/controlrate_profile.h"
 #include "fc/fc_core.h"
+#include "fc/fc_dispatch.h"
 #include "fc/fc_rc.h"
 #include "fc/rc_adjustments.h"
 #include "fc/rc_controls.h"
@@ -83,11 +84,10 @@
 
 #include "telemetry/telemetry.h"
 
-#include "flight/altitude.h"
+#include "flight/position.h"
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
-#include "flight/navigation.h"
 #include "flight/pid.h"
 #include "flight/servos.h"
 
@@ -121,6 +121,7 @@ enum {
 #define DEBUG_RUNAWAY_TAKEOFF_FALSE 0
 #endif
 
+#define PARALYZE_PREVENT_MODE_CHANGES_DELAY_US   100000 // Delay after paralyze mode activates to let other mode changes propagate
 
 #if defined(USE_GPS) || defined(USE_MAG)
 int16_t magHold;
@@ -141,6 +142,14 @@ static timeUs_t runawayTakeoffTriggerUs = 0;
 static bool runawayTakeoffTemporarilyDisabled = false;
 #endif
 
+static bool paralyzeModeAllowed = false;
+
+void preventModeChangesDispatch(dispatchEntry_t *self) {
+    UNUSED(self);
+    preventModeChanges();
+}
+
+static dispatchEntry_t preventModeChangesDispatchEntry = { .dispatch = preventModeChangesDispatch};
 
 PG_REGISTER_WITH_RESET_TEMPLATE(throttleCorrectionConfig_t, throttleCorrectionConfig, PG_THROTTLE_CORRECTION_CONFIG, 0);
 
@@ -245,6 +254,11 @@ void updateArmingStatus(void)
             }
         }
 
+        if (IS_RC_MODE_ACTIVE(BOXPARALYZE) && paralyzeModeAllowed) {
+            setArmingDisabled(ARMING_DISABLED_PARALYZE);
+            dispatchAdd(&preventModeChangesDispatchEntry, PARALYZE_PREVENT_MODE_CHANGES_DELAY_US);
+        }
+
         if (!isUsingSticksForArming()) {
           /* Ignore ARMING_DISABLED_CALIBRATING if we are going to calibrate gyro on first arm */
           bool ignoreGyro = armingConfig()->gyro_cal_on_first_arm
@@ -280,6 +294,11 @@ void updateArmingStatus(void)
         }
 
         warningLedUpdate();
+    }
+
+    // Check if entering into paralyze mode can be allowed regardless of arming status
+    if (!IS_RC_MODE_ACTIVE(BOXPARALYZE) && !paralyzeModeAllowed) {
+        paralyzeModeAllowed = true;
     }
 }
 
@@ -518,6 +537,7 @@ bool processRx(timeUs_t currentTimeUs)
 {
     static bool armedBeeperOn = false;
     static bool airmodeIsActivated;
+    static bool sharedPortTelemetryEnabled = false;
 
     if (!calculateRxChannelsAndUpdateFailsafe(currentTimeUs)) {
         return false;
@@ -756,13 +776,7 @@ bool processRx(timeUs_t currentTimeUs)
         }
     }
 #endif
-
-#ifdef USE_NAV
-    if (sensors(SENSOR_GPS)) {
-        updateGpsWaypointsAndMode();
-    }
-#endif
-
+    
     if (IS_RC_MODE_ACTIVE(BOXPASSTHRU)) {
         ENABLE_FLIGHT_MODE(PASSTHRU_MODE);
     } else {
@@ -775,14 +789,18 @@ bool processRx(timeUs_t currentTimeUs)
 
 #ifdef USE_TELEMETRY
     if (feature(FEATURE_TELEMETRY)) {
-        if ((!telemetryConfig()->telemetry_switch && ARMING_FLAG(ARMED)) ||
-                (telemetryConfig()->telemetry_switch && IS_RC_MODE_ACTIVE(BOXTELEMETRY))) {
+        bool enableSharedPortTelemetry = (!isModeActivationConditionPresent(BOXTELEMETRY) && ARMING_FLAG(ARMED)) || (isModeActivationConditionPresent(BOXTELEMETRY) && IS_RC_MODE_ACTIVE(BOXTELEMETRY));
+        if (enableSharedPortTelemetry && !sharedPortTelemetryEnabled) {
+            mspSerialReleaseSharedTelemetryPorts();
+            telemetryCheckState();
 
-            releaseSharedTelemetryPorts();
-        } else {
+            sharedPortTelemetryEnabled = true;
+        } else if (!enableSharedPortTelemetry && sharedPortTelemetryEnabled) {
             // the telemetry state must be checked immediately so that shared serial ports are released.
             telemetryCheckState();
             mspSerialAllocatePorts();
+
+            sharedPortTelemetryEnabled = false;
         }
     }
 #endif
@@ -866,17 +884,7 @@ static NOINLINE void subTaskMainSubprocesses(timeUs_t currentTimeUs)
         updateMagHold();
     }
 #endif
-
-#if defined(USE_ALT_HOLD)
-    // updateRcCommands sets rcCommand, which is needed by updateAltHoldState and updateSonarAltHoldState
-    updateRcCommands();
-    if (sensors(SENSOR_BARO) || sensors(SENSOR_RANGEFINDER)) {
-        if (FLIGHT_MODE(BARO_MODE) || FLIGHT_MODE(RANGEFINDER_MODE)) {
-            applyAltHold();
-        }
-    }
-#endif
-
+    
     // If we're armed, at minimum throttle, and we do arming via the
     // sticks, do not process yaw input from the rx.  We do this so the
     // motors do not spin up while we are trying to arm or disarm.
@@ -898,14 +906,6 @@ static NOINLINE void subTaskMainSubprocesses(timeUs_t currentTimeUs)
     }
 
     processRcCommand();
-
-#ifdef USE_NAV
-    if (sensors(SENSOR_GPS)) {
-        if ((FLIGHT_MODE(GPS_HOME_MODE) || FLIGHT_MODE(GPS_HOLD_MODE)) && STATE(GPS_FIX_HOME)) {
-            updateGpsStateForHomeAndHoldMode();
-        }
-    }
-#endif
 
 #ifdef USE_SDCARD
     afatfs_poll();

@@ -66,12 +66,8 @@ void pgResetFn_servoConfig(servoConfig_t *servoConfig)
     servoConfig->servo_lowpass_freq = 0;
     servoConfig->channelForwardingStartChannel = AUX1;
 
-    int servoIndex = 0;
-    for (int i = 0; i < USABLE_TIMER_CHANNEL_COUNT && servoIndex < MAX_SUPPORTED_SERVOS; i++) {
-        if (timerHardware[i].usageFlags & TIM_USE_SERVO) {
-            servoConfig->dev.ioTags[servoIndex] = timerHardware[i].tag;
-            servoIndex++;
-        }
+    for (unsigned servoIndex = 0; servoIndex < MAX_SUPPORTED_SERVOS; servoIndex++) {
+        servoConfig->dev.ioTags[servoIndex] = timerioTagGetByUsage(TIM_USE_SERVO, servoIndex);
     }
 }
 
@@ -150,10 +146,10 @@ static const servoMixer_t servoMixerSingle[] = {
 
 static const servoMixer_t servoMixerHeli[] = {
     { SERVO_HELI_LEFT, INPUT_STABILIZED_PITCH,   -50, 0, 0, 100, 0 },
-    { SERVO_HELI_LEFT, INPUT_STABILIZED_ROLL,    87, 0, 0, 100, 0 },
+    { SERVO_HELI_LEFT, INPUT_STABILIZED_ROLL,    -87, 0, 0, 100, 0 },
     { SERVO_HELI_LEFT, INPUT_RC_AUX1,    100, 0, 0, 100, 0 },
     { SERVO_HELI_RIGHT, INPUT_STABILIZED_PITCH,  -50, 0, 0, 100, 0 },
-    { SERVO_HELI_RIGHT, INPUT_STABILIZED_ROLL,  -87, 0, 0, 100, 0 },
+    { SERVO_HELI_RIGHT, INPUT_STABILIZED_ROLL,  87, 0, 0, 100, 0 },
     { SERVO_HELI_RIGHT, INPUT_RC_AUX1,    100, 0, 0, 100, 0 },
     { SERVO_HELI_TOP, INPUT_STABILIZED_PITCH,   100, 0, 0, 100, 0 },
     { SERVO_HELI_TOP, INPUT_RC_AUX1,    100, 0, 0, 100, 0 },

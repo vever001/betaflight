@@ -18,22 +18,10 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#include "timerio.h"
 
-#include "common/time.h"
+#ifdef USE_TIMER_MGMT
 
-extern int32_t AltHold;
+PG_REGISTER_ARRAY(timerIOConfig_t, MAX_TIMER_PINMAP_COUNT, timerIOConfig, PG_TIMER_IO_CONFIG, 0);
 
-typedef struct airplaneConfig_s {
-    bool fixedwing_althold_reversed;           // false for negative pitch/althold gain. later check if need more than just sign
-} airplaneConfig_t;
-
-PG_DECLARE(airplaneConfig_t, airplaneConfig);
-
-void calculateEstimatedAltitude(timeUs_t currentTimeUs);
-int32_t getEstimatedAltitude(void);
-int32_t getEstimatedVario(void);
-
-void applyAltHold(void);
-void updateAltHoldState(void);
-void updateRangefinderAltHoldState(void);
+#endif
